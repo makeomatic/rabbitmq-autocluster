@@ -1,7 +1,8 @@
 FROM alpine:3.4
 
 # Version of RabbitMQ to install
-ENV RABBITMQ_VERSION=3.6.2 \
+ENV RABBITMQ_VERSION=3.6.5 \
+    AUTOCLUSTER_VERSION=0.6.1 \
     ERL_EPMD_PORT=4369 \
     HOME=/var/lib/rabbitmq \
     PATH=/usr/lib/rabbitmq/sbin:$PATH \
@@ -16,16 +17,28 @@ ENV RABBITMQ_VERSION=3.6.2 \
     LANG=en_US.UTF-8
 
 RUN \
-  apk --update add \
+  apk --update upgrade \
+  && apk add \
     coreutils curl xz "su-exec>=0.2" \
     erlang erlang-asn1 erlang-crypto erlang-eldap erlang-erts erlang-inets erlang-mnesia \
-    erlang-os-mon erlang-public-key erlang-sasl erlang-ssl erlang-syntax-tools erlang-xmerl && \
-  curl -sL -o /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz https://www.rabbitmq.com/releases/rabbitmq-server/v${RABBITMQ_VERSION}/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.xz && \
-  cd /usr/lib/ && \
-  tar xf /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz && \
-  rm /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz && \
-  mv /usr/lib/rabbitmq_server-${RABBITMQ_VERSION} /usr/lib/rabbitmq && \
-  apk --purge del curl tar gzip xz
+    erlang-os-mon erlang-public-key erlang-sasl erlang-ssl erlang-syntax-tools erlang-xmerl \
+  && curl -sL -o /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz https://www.rabbitmq.com/releases/rabbitmq-server/v${RABBITMQ_VERSION}/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.xz \
+  && cd /usr/lib \
+  && tar xf /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz \
+  && rm /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz \
+  && mv /usr/lib/rabbitmq_server-${RABBITMQ_VERSION} /usr/lib/rabbitmq \
+  && curl -sL -o /tmp/autocluster-${AUTOCLUSTER_VERSION}.tgz https://github.com/aweber/rabbitmq-autocluster/releases/download/${AUTOCLUSTER_VERSION}/autocluster-${AUTOCLUSTER_VERSION}.tgz \
+  && tar -xvz -C /usr/lib/rabbitmq -f /tmp/autocluster-${AUTOCLUSTER_VERSION}.tgz \
+  && rm /tmp/autocluster-${AUTOCLUSTER_VERSION}.tgz \
+  && apk --purge del \
+    curl \
+    tar \
+    gzip \
+    xz \
+  && rm -rf \
+    /etc/apk/cache/* \
+    /var/cache/apk/* \
+    /tmp/*
 
 COPY root/ /
 
