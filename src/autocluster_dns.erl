@@ -9,6 +9,8 @@
 
 %% autocluster_backend methods
 -export([nodelist/0,
+         lock/1,
+         unlock/1,
          register/0,
          unregister/0]).
 
@@ -19,13 +21,19 @@
 
 -include("autocluster.hrl").
 
-
 %% @spec nodelist() -> {ok, list()}|{error, Reason :: string()}
 %% @doc Return a list of nodes registered in Consul
 %% @end
 %%
 nodelist() -> {ok, [autocluster_util:node_name(N) || N <- build_node_list()]}.
 
+-spec lock(string()) -> not_supported.
+lock(_) ->
+    not_supported.
+
+-spec unlock(term()) -> ok.
+unlock(_) ->
+    ok.
 
 %% @spec register() -> ok|{error, Reason :: string()}
 %% @doc Stub, since this module does not update DNS
@@ -47,7 +55,7 @@ unregister() -> ok.
 %%
 build_node_list() ->
   Name = autocluster_config:get(autocluster_host),
-  Hosts = [extract_host(inet_res:gethostbyaddr(A)) || A <- inet_res:lookup(Name, in, a)],
+  Hosts = [extract_host(inet:gethostbyaddr(A)) || A <- inet_res:lookup(Name, in, a)],
   lists:filter(fun(E) -> E =/= error end, Hosts).
 
 

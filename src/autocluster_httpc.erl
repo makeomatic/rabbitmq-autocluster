@@ -11,6 +11,7 @@
          build_uri/5,
          delete/6,
          get/5,
+         get/7,
          post/6,
          put/6]).
 
@@ -24,44 +25,47 @@
 -define(CONTENT_URLENCODED, "application/x-www-form-urlencoded").
 
 
+-type path_component() :: autocluster_util:stringifyable().
+-type query_component() :: {autocluster_util:stringifyable(), autocluster_util:stringifyable()}.
+-export_type([path_component/0, query_component/0]).
+
+
 %% @public
-%% @spec build_path(list()) -> string()
 %% @doc Build the path from a list of segments
 %% @end
 %%
+-spec build_path([path_component()]) -> string().
 build_path(Args) ->
   build_path(Args, []).
 
 
 %% @public
-%% @spec build_path(string(), string()) -> string()
 %% @doc Build the path from a list of segments
 %% @end
 %%
+-spec build_path([path_component()], string()) -> string().
 build_path([Part|Parts], Path) ->
   build_path(Parts, string:join([Path, percent_encode(Part)], "/"));
 build_path([], Path) -> Path.
 
 
 %% @public
-%% @spec build_uri(Scheme, Host, Port, Path, QArgs) -> string()
-%% where Scheme = string()
-%%       Host = string()
-%%       Port = integer()
-%%       Path = string()
-%%       QArgs = proplist()
 %% @doc Build the request URI
 %% @end
 %%
+-spec build_uri(Scheme, Host, Port, [path_component()], [query_component()]) -> string() when
+      Scheme :: string(),
+      Host :: string(),
+      Port :: integer().
 build_uri(Scheme, Host, Port, Path, QArgs) ->
   build_uri(string:join([Scheme, "://", Host, ":", autocluster_util:as_string(Port)], ""), Path, QArgs).
 
 
 %% @public
-%% @spec build_uri(string(), string(), proplist()) -> string()
 %% @doc Build the requst URI for the given base URI, path and query args
 %% @end
 %%
+-spec build_uri(string(), [path_component()], [query_component()]) -> string().
 build_uri(Base, Path, []) ->
   string:join([Base, build_path(Path)], "");
 build_uri(Base, Path, QArgs) ->
@@ -70,22 +74,19 @@ build_uri(Base, Path, QArgs) ->
 
 
 %% @public
-%% @spec build_query(proplist()) -> string()
 %% @doc Build the query parameters string from a proplist
 %% @end
 %%
+-spec build_query([query_component()]) -> string().
 build_query(Args) ->
   build_query(Args, []).
 
 
 %% @public
-%% @spec build_query(proplist(), string()) -> string()
 %% @doc Build the query parameters string from a proplist
 %% @end
 %%
-build_query([{Key,Value}|Args], Parts) when is_atom(Key) =:= true ->
-  build_query(Args, lists:merge(Parts, [string:join([percent_encode(Key),
-                                                     percent_encode(Value)], "=")]));
+-spec build_query([query_component()], [string()]) -> string().
 build_query([{Key,Value}|Args], Parts) ->
   build_query(Args, lists:merge(Parts, [string:join([percent_encode(Key),
                                                      percent_encode(Value)], "=")]));
@@ -96,36 +97,52 @@ build_query([], Parts) ->
 
 
 %% @public
-%% @spec get(Scheme, Host, Port, Path, Args) -> Result
-%% @where Scheme = string(),
-%%        Host   = string(),
-%%        Port   = integer(),
-%%        Path   = string(),
-%%        Args   = proplist(),
-%%        Result = {ok, mixed}|{error, Reason::string()}
 %% @doc Perform a HTTP GET request
 %% @end
 %%
+-spec get(Scheme, Host, Port, Path, Args) -> Result when
+      Scheme :: string(),
+      Host   :: string(),
+      Port   :: integer(),
+      Path   :: [path_component()],
+      Args   :: [query_component()],
+      Result :: {ok, term()} | {error, Reason::term()}.
 get(Scheme, Host, Port, Path, Args) ->
-  URL = build_uri(Scheme, Host, Port, Path, Args),
-  autocluster_log:debug("GET ~s", [URL]),
-  Response = httpc:request(URL),
-  autocluster_log:debug("Response: [~p]", [Response]),
-  parse_response(Response).
+    get(Scheme, Host, Port, Path, Args, [], []).
 
 
 %% @public
-%% @spec post(Scheme, Host, Port, Path, Args, Body) -> Result
-%% @where Scheme = string(),
-%%        Host   = string(),
-%%        Port   = integer(),
-%%        Path   = string(),
-%%        Args   = proplist(),
-%%        Body   = string(),
-%%        Result = {ok, mixed}|{error, Reason::string()}
+%% @doc Perform a HTTP GET request
+%% @end
+%%
+-spec get(Scheme, Host, Port, Path, Args, Headers, HttpOpts) -> Result when
+      Scheme :: string(),
+      Host   :: string(),
+      Port   :: integer(),
+      Path   :: [path_component()],
+      Args   :: [query_component()],
+      Headers :: [{string(), string()}],
+      HttpOpts :: [{atom(), term()}],
+      Result :: {ok, term()} | {error, Reason::term()}.
+get(Scheme, Host, Port, Path, Args, Headers, HttpOpts) ->
+  URL = build_uri(Scheme, Host, Port, Path, Args),
+  autocluster_log:debug("GET ~s", [URL]),
+  Response = httpc:request(get, {URL, Headers}, HttpOpts, []),
+  autocluster_log:debug("Response: [~p]", [Response]),
+  parse_response(Response).
+
+%% @public
 %% @doc Perform a HTTP POST request
 %% @end
 %%
+-spec post(Scheme, Host, Port, Path, Args, Body) -> Result when
+      Scheme :: string(),
+      Host   :: string(),
+      Port   :: integer(),
+      Path   :: [path_component()],
+      Args   :: [query_component()],
+      Body   :: string() | binary(),
+      Result :: {ok, term()} | {error, Reason::term()}.
 post(Scheme, Host, Port, Path, Args, Body) ->
   URL = build_uri(Scheme, Host, Port, Path, Args),
   autocluster_log:debug("POST ~s [~p]", [URL, Body]),

@@ -52,6 +52,13 @@ app_envvar_test_() ->
           application:set_env(autocluster, consul_svc, <<"rabbit">>),
           ?assertEqual("rabbit", autocluster_config:get(consul_svc))
         end
+      },
+      {
+        "app list value when string",
+        fun() ->
+          application:set_env(autocluster, proxy_exclusions, "foo,42,42.5"),
+          ?assertEqual(["foo", 42, 42.5], autocluster_config:get(proxy_exclusions))
+        end
       }
     ]
   }.
@@ -98,7 +105,22 @@ os_envvar_test_() ->
           os:putenv("CONSUL_PORT", "tcp://172.17.10.3:8501"),
           ?assertEqual(8501, autocluster_config:get(consul_port))
         end
+      },
+      {
+        "aws tags",
+        fun() ->
+          os:putenv("AWS_EC2_TAGS",
+                    "{\"region\": \"us-west-2\",\"service\": \"rabbitmq\"}"),
+          ?assertEqual([{"region", "us-west-2"}, {"service", "rabbitmq"}],
+                       autocluster_config:get(aws_ec2_tags))
+        end
+      },
+      {
+        "proxy exclusions",
+        fun() ->
+          os:putenv("PROXY_EXCLUSIONS", "foo,42,42.5"),
+          ?assertEqual(["foo", 42, 42.5], autocluster_config:get(proxy_exclusions))
+        end
       }
     ]
   }.
-

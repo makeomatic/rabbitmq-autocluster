@@ -1,9 +1,9 @@
-FROM alpine:3.5
+FROM alpine:3.6
 
 # Version of RabbitMQ to install
-ENV RABBITMQ_VERSION=3.6.9 \
-    AUTOCLUSTER_VERSION=0.6.1 \
+ENV RABBITMQ_VERSION=3.6.12 \
     ERL_EPMD_PORT=4369 \
+    AUTOCLUSTER_VERSION=0.8.0 \
     HOME=/var/lib/rabbitmq \
     PATH=/usr/lib/rabbitmq/sbin:$PATH \
     RABBITMQ_LOGS=- \
@@ -19,22 +19,17 @@ ENV RABBITMQ_VERSION=3.6.9 \
 RUN \
   apk --update upgrade \
   && apk add \
-    coreutils curl xz "su-exec>=0.2" \
-    erlang erlang-asn1 erlang-crypto erlang-eldap erlang-erts erlang-inets erlang-mnesia \
-    erlang-os-mon erlang-public-key erlang-sasl erlang-ssl erlang-syntax-tools erlang-xmerl \
+      coreutils curl xz "su-exec>=0.2" \
+      erlang erlang-asn1 erlang-crypto erlang-eldap erlang-erts erlang-inets erlang-mnesia \
+      erlang-os-mon erlang-public-key erlang-sasl erlang-ssl erlang-syntax-tools erlang-xmerl \
   && curl -sL -o /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz https://www.rabbitmq.com/releases/rabbitmq-server/v${RABBITMQ_VERSION}/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.xz \
   && cd /usr/lib \
   && tar xf /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz \
   && rm /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz \
   && mv /usr/lib/rabbitmq_server-${RABBITMQ_VERSION} /usr/lib/rabbitmq \
-  && curl -sL -o /tmp/autocluster-${AUTOCLUSTER_VERSION}.tgz https://github.com/aweber/rabbitmq-autocluster/releases/download/${AUTOCLUSTER_VERSION}/autocluster-${AUTOCLUSTER_VERSION}.tgz \
-  && tar -xvz -C /usr/lib/rabbitmq -f /tmp/autocluster-${AUTOCLUSTER_VERSION}.tgz \
-  && rm /tmp/autocluster-${AUTOCLUSTER_VERSION}.tgz \
-  && apk --purge del \
-    curl \
-    tar \
-    gzip \
-    xz \
+  && curl -sL -o /usr/lib/rabbitmq/plugins/autocluster-${AUTOCLUSTER_VERSION}.ez https://github.com/rabbitmq/rabbitmq-autocluster/releases/download/${AUTOCLUSTER_VERSION}/autocluster-${AUTOCLUSTER_VERSION}.ez \
+  && curl -sL -o /usr/lib/rabbitmq/plugins/rabbitmq_aws-${AUTOCLUSTER_VERSION}.ez https://github.com/rabbitmq/rabbitmq-autocluster/releases/download/${AUTOCLUSTER_VERSION}/rabbitmq_aws-${AUTOCLUSTER_VERSION}.ez \
+  && apk --purge del curl tar gzip xz
   && rm -rf \
     /etc/apk/cache/* \
     /var/cache/apk/* \
@@ -48,10 +43,9 @@ RUN \
   cp /var/lib/rabbitmq/.erlang.cookie /root/ && \
   chown rabbitmq /var/lib/rabbitmq/.erlang.cookie && \
   chmod 0600 /var/lib/rabbitmq/.erlang.cookie /root/.erlang.cookie && \
-  chown -R rabbitmq /usr/lib/rabbitmq /var/lib/rabbitmq && \
+  chown -R rabbitmq /usr/lib/rabbitmq /var/lib/rabbitmq && sync && \
   /usr/lib/rabbitmq/sbin/rabbitmq-plugins --offline enable \
     rabbitmq_management \
-    rabbitmq_management_visualiser \
     rabbitmq_consistent_hash_exchange \
     rabbitmq_federation \
     rabbitmq_federation_management \

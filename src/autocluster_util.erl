@@ -9,12 +9,21 @@
 -export([as_atom/1,
          as_integer/1,
          as_string/1,
+         as_list/1,
          backend_module/0,
          nic_ipv4/1,
-         node_hostname/0,
+         node_hostname/1,
          node_name/1,
-         parse_port/1]).
+         parse_port/1,
+         augment_nodelist/1,
+         stringify_error/1,
+         as_proplist/1
+        ]).
 
+-include("autocluster.hrl").
+
+%% Private exports for RPC
+-export([augmented_node_info/0]).
 
 %% Export all for unit tests
 -ifdef(TEST).
@@ -25,6 +34,8 @@
                  {netmask,inet:ip_address()} | {broadaddr,inet:ip_address()} |
                  {dstaddr,inet:ip_address()} | {hwaddr,[byte()]}.
 
+-type stringifyable() :: atom() | binary() | string() | integer().
+-export_type([stringifyable/0]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -68,7 +79,7 @@ as_integer(Value) ->
 %% Return the passed in value as a string.
 %% @end
 %%--------------------------------------------------------------------
--spec as_string(Value :: atom() | binary() | integer() | string())
+-spec as_string(Value :: stringifyable())
     -> string().
 as_string([]) -> "";
 as_string(Value) when is_atom(Value) ->
@@ -80,6 +91,32 @@ as_string(Value) when is_integer(Value) ->
 as_string(Value) when is_list(Value) ->
   lists:flatten(Value);
 as_string(Value) ->
+  autocluster_log:error("Unexpected data type for list value: ~p~n",
+                        [Value]),
+  Value.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Return the passed in value as a list of strings.
+%% @end
+%%--------------------------------------------------------------------
+-spec as_list(Value :: stringifyable() | list()) -> list().
+as_list([]) -> [];
+as_list(Value) when is_atom(Value) ; is_integer(Value) ; is_binary(Value) ->
+  [Value];
+as_list(Value) when is_list(Value) ->
+  case io_lib:printable_list(Value) or io_lib:printable_unicode_list(Value) of
+    true -> [case string:to_float(S) of
+               {Float, []} -> Float;
+               _ -> case string:to_integer(S) of
+                      {Integer, []} -> Integer;
+                      _ -> string:strip(S)
+                    end
+             end || S <- string:tokens(Value, ",")];
+    false -> Value
+  end;
+as_list(Value) ->
   autocluster_log:error("Unexpected data type for list value: ~p~n",
                         [Value]),
   Value.
@@ -106,6 +143,7 @@ backend_module(aws)          -> autocluster_aws;
 backend_module(consul)       -> autocluster_consul;
 backend_module(dns)          -> autocluster_dns;
 backend_module(etcd)         -> autocluster_etcd;
+backend_module(k8s)          -> autocluster_k8s;
 backend_module(_)            -> undefined.
 
 
@@ -154,13 +192,17 @@ nic_ipv4_address([_|T]) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% Return the hostname for the current node (without the tuple)
+%% Hostname can be taken from network info or nodename.
 %% @end
 %%--------------------------------------------------------------------
--spec node_hostname() -> string().
-node_hostname() ->
-  {ok, Hostname} = inet:gethostname(),
-  Hostname.
-
+-spec node_hostname(boolean()) -> string().
+node_hostname(false = _FromNodename) ->
+    {ok, Hostname} = inet:gethostname(),
+    Hostname;
+node_hostname(true = _FromNodename) ->
+    {match, [Hostname]} = re:run(atom_to_list(node()), "@(.*)",
+                                 [{capture, [1], list}]),
+    Hostname.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -168,11 +210,19 @@ node_hostname() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec node_name(Value :: atom() | binary() | string()) -> atom().
-node_name(Value) ->
-  list_to_atom(string:join([node_prefix(),
-                            node_name_parse(as_string(Value))],
-                           "@")).
-
+node_name(Value) when is_atom(Value) ->
+    node_name(atom_to_list(Value));
+node_name(Value) when is_binary(Value) ->
+    node_name(binary_to_list(Value));
+node_name(Value) when is_list(Value) ->
+  case lists:member($@, Value) of
+      true ->
+          list_to_atom(Value);
+      false ->
+          list_to_atom(string:join([node_prefix(),
+                                    node_name_parse(as_string(Value))],
+                                   "@"))
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -182,7 +232,7 @@ node_name(Value) ->
 %% most part of the name, delimited by periods.
 %% @end
 %%--------------------------------------------------------------------
--spec node_name_parse(Value :: string()) -> atom().
+-spec node_name_parse(Value :: string()) -> string().
 node_name_parse(Value) ->
   case inet:parse_ipv4strict_address(Value) of
     {ok, _} ->
@@ -199,7 +249,7 @@ node_name_parse(Value) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec node_name_parse(IsIPv4 :: true | false, Value :: string())
-    -> atom().
+    -> string().
 node_name_parse(true, Value) -> Value;
 node_name_parse(false, Value) ->
   Parts = string:tokens(Value, "."),
@@ -215,8 +265,8 @@ node_name_parse(false, Value) ->
 %%--------------------------------------------------------------------
 -spec node_name_parse(Segments :: integer(),
                       Value :: string(),
-                      Parts :: list())
-    -> atom().
+                      Parts :: [string()])
+    -> string().
 node_name_parse(1, Value, _) -> Value;
 node_name_parse(_, _, Parts) ->
   as_string(lists:nth(1, Parts)).
@@ -245,3 +295,75 @@ node_prefix() ->
 parse_port(Value) when is_list(Value) ->
   as_integer(lists:last(string:tokens(Value, ":")));
 parse_port(Value) -> as_integer(Value).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Filters dead nodes from node list, augments it with additional
+%% information - what other nodes it is clustered with, uptime and all
+%% other pieces of information necessary to choose the best node to
+%% join to.
+%% @end
+%%--------------------------------------------------------------------
+-spec augment_nodelist([node()]) -> [#candidate_seed_node{}].
+augment_nodelist(Nodes) ->
+    %% TODO: this should not be hardcoded
+    {Responses, UnreachableNodes} = rpc:multicall(Nodes, autocluster_util, augmented_node_info, [], 5000),
+    autocluster_log:debug("Fetching node details. Unreachable nodes (or nodes that responded with an error): ~p", [UnreachableNodes]),
+    autocluster_log:debug("Fetching node details. Responses: ~p", [Responses]),
+    [A || A = #candidate_seed_node{} <- Responses].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Collects information for clustering decisions on the current
+%% node. Only called using RPC from augment_nodelist/1.
+%% @end
+%%--------------------------------------------------------------------
+-spec augmented_node_info() -> #candidate_seed_node{}.
+augmented_node_info() ->
+    Running = rabbit_mnesia:cluster_nodes(running),
+    Partitioned = rabbit_node_monitor:partitions(),
+    #candidate_seed_node{
+       name = node(),
+       uptime = element(1, erlang:statistics(wall_clock)),
+       alive = true,
+       clustered_with = rabbit_mnesia:cluster_nodes(all),
+       alive_cluster_nodes = Running -- Partitioned,
+       partitioned_cluster_nodes = Partitioned,
+       other_cluster_nodes = []
+      }.
+
+-spec stringify_error({ok, term()} | {error, term()}) -> {ok, term()} | {error, string()}.
+stringify_error({ok, _} = Res) ->
+    Res;
+stringify_error({error, Str}) when is_list(Str) ->
+    {error, Str};
+stringify_error({error, Term}) ->
+    {error, lists:flatten(io_lib:format("~p", [Term]))}.
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Returns a proplist from a JSON structure (environment variable) or
+%% the settings key (already a proplist).
+%% @end
+%%--------------------------------------------------------------------
+-spec as_proplist(Value :: string() | [{string(), string()}]) ->
+                         [{string(), string()}].
+as_proplist([Tuple | _] = Json) when is_tuple(Tuple) ->
+    Json;
+as_proplist([]) ->
+    [];
+as_proplist(List) when is_list(List) ->
+    case rabbit_misc:json_decode(List) of
+        {ok, {struct, _} = Json} ->
+            [{binary_to_list(K), binary_to_list(V)}
+             || {K, V} <- rabbit_misc:json_to_term(Json)];
+        _ ->
+            autocluster_log:error("Unexpected data type for proplist value: ~p. JSON parser returned an error!~n",
+                                  [List]),
+            []
+    end;
+as_proplist(Value) ->
+    autocluster_log:error("Unexpected data type for proplist value: ~p.~n",
+                          [Value]),
+    [].
