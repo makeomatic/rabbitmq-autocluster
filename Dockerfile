@@ -17,19 +17,20 @@ ENV RABBITMQ_VERSION=3.6.16 \
     LANG=en_US.UTF-8
 
 RUN \
-  apk --update upgrade \
+  set -ex \
+  && apk --update upgrade \
   && apk add \
-      coreutils curl xz "su-exec>=0.2" \
+      coreutils curl xz "su-exec>=0.2" tar ca-certificates \
       erlang erlang-asn1 erlang-crypto erlang-eldap erlang-erts erlang-inets erlang-mnesia \
       erlang-os-mon erlang-public-key erlang-sasl erlang-ssl erlang-syntax-tools erlang-xmerl \
-  && curl -sL -o /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz https://www.rabbitmq.com/releases/rabbitmq-server/v${RABBITMQ_VERSION}/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.xz \
+  && curl -sL -o /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.xz https://github.com/rabbitmq/rabbitmq-server/releases/download/rabbitmq_v`echo $RABBITMQ_VERSION | tr  "."  "_"`/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.xz \
   && cd /usr/lib \
-  && tar xf /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz \
-  && rm /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.gz \
+  && tar xf /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.xz \
+  && rm /tmp/rabbitmq-server-generic-unix-${RABBITMQ_VERSION}.tar.xz \
   && mv /usr/lib/rabbitmq_server-${RABBITMQ_VERSION} /usr/lib/rabbitmq \
-  && curl -sL -o /usr/lib/rabbitmq/plugins/autocluster-${AUTOCLUSTER_VERSION}.ez https://github.com/rabbitmq/rabbitmq-autocluster/releases/download/${AUTOCLUSTER_VERSION}/autocluster-${AUTOCLUSTER_VERSION}.ez \
-  && curl -sL -o /usr/lib/rabbitmq/plugins/rabbitmq_aws-${AUTOCLUSTER_VERSION}.ez https://github.com/rabbitmq/rabbitmq-autocluster/releases/download/${AUTOCLUSTER_VERSION}/rabbitmq_aws-${AUTOCLUSTER_VERSION}.ez \
-  && apk --purge del curl tar gzip xz \
+  && curl -sL --verbose -o /usr/lib/rabbitmq/plugins/autocluster-${AUTOCLUSTER_VERSION}.ez https://github.com/rabbitmq/rabbitmq-autocluster/releases/download/${AUTOCLUSTER_VERSION}/autocluster-${AUTOCLUSTER_VERSION}.ez \
+  && curl -sL --verbose -o /usr/lib/rabbitmq/plugins/rabbitmq_aws-${AUTOCLUSTER_VERSION}.ez https://github.com/rabbitmq/rabbitmq-autocluster/releases/download/${AUTOCLUSTER_VERSION}/rabbitmq_aws-${AUTOCLUSTER_VERSION}.ez \
+  && apk --purge del curl tar xz \
   && rm -rf \
     /etc/apk/cache/* \
     /var/cache/apk/* \
